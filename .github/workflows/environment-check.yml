@@ -1,0 +1,37 @@
+
+name: Environment Check
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check system resources
+        run: |
+          echo "=== Operating System ==="
+          uname -a
+
+          echo "=== CPU ==="
+          nproc
+
+          echo "=== RAM ==="
+          free -h
+
+          echo "=== Storage ==="
+          df -h /
+
+      - name: Check Python
+        run: |
+          python3 --version
+          pip3 --version
+
+      - name: Check Docker
+        run: |
+          docker --version
+          docker info
