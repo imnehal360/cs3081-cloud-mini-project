@@ -175,6 +175,59 @@ jobs:
           print("PASS: Kubernetes API working!")
           PY
 
+      - name: Test rolling update and rollback
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== Disable HPA during controlled update ==="
+          kubectl delete hpa command-parser-hpa \
+            -n app --ignore-not-found
+
+          echo "=== Update from v1 to v2 ==="
+          kubectl set env deployment/command-parser \
+            -n app MODEL_VERSION=v2
+
+          kubectl rollout status deployment/command-parser \
+            -n app --timeout=300s
+
+          echo "=== Verify v2 ==="
+          for i in 1 2 3; do
+            curl -fsS \
+              -D /tmp/v2-headers.txt \
+              -o /tmp/v2-response.json \
+              -X POST http://127.0.0.1:8080/parse \
+              -H "Content-Type: application/json" \
+              -d '{"text":"set an alarm for seven am tomorrow"}'
+
+            grep -iq 'x-model-version: v2' \
+              /tmp/v2-headers.txt
+          done
+
+          echo "Model v2 is serving requests."
+
+          echo "=== Roll back to v1 ==="
+          kubectl rollout undo \
+            deployment/command-parser -n app
+
+          kubectl rollout status deployment/command-parser \
+            -n app --timeout=300s
+
+          echo "=== Verify v1 ==="
+          for i in 1 2 3; do
+            curl -fsS \
+              -D /tmp/v1-headers.txt \
+              -o /tmp/v1-response.json \
+              -X POST http://127.0.0.1:8080/parse \
+              -H "Content-Type: application/json" \
+              -d '{"text":"set an alarm for seven am tomorrow"}'
+
+            grep -iq 'x-model-version: v1' \
+              /tmp/v1-headers.txt
+          done
+
+          echo "PASS: v1 to v2 update and rollback!"
+
       - name: Save cluster evidence
         if: always()
         shell: bash
