@@ -1,0 +1,172 @@
+name: Test Kubernetes Deployment
+
+on:
+  workflow_dispatch:
+
+jobs:
+  kubernetes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.31.4
+
+      - name: Install k3d
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh \
+            -o /tmp/install-k3d.sh
+          bash /tmp/install-k3d.sh
+          k3d version
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t cs3081-api:v1 \
+            -f service/Dockerfile .
+
+          docker image ls cs3081-api:v1
+
+      - name: Create Kubernetes cluster
+        run: |
+          k3d cluster create \
+            --config cluster/k3d.yaml
+
+          kubectl get nodes
+
+      - name: Import Docker image into k3d
+        run: |
+          k3d image import cs3081-api:v1 \
+            --cluster cs3081
+
+      - name: Deploy application
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/deployment.yaml
+          kubectl apply -f k8s/service.yaml
+          kubectl apply -f k8s/ingress.yaml
+
+          kubectl get deployments,pods,services,ingress \
+            -n app
+
+      - name: Wait for two replicas
+        shell: bash
+        run: |
+          kubectl rollout status \
+            deployment/command-parser \
+            -n app \
+            --timeout=300s
+
+          kubectl wait \
+            --for=condition=Ready pod \
+            -l app=command-parser \
+            -n app \
+            --timeout=300s
+
+          READY=$(kubectl get pods -n app \
+            -l app=command-parser \
+            --field-selector=status.phase=Running \
+            -o jsonpath='{range .items[*]}{.status.containerStatuses[0].ready}{"\n"}{end}' \
+            | grep -c '^true$' || true)
+
+          echo "Ready replicas: $READY"
+
+          if [ "$READY" -ne 2 ]; then
+            echo "Expected exactly two ready replicas"
+            exit 1
+          fi
+
+      - name: Test API through Ingress
+        shell: bash
+        run: |
+          set -e
+
+          for i in $(seq 1 30); do
+            STATUS=$(curl -sS \
+              -o /tmp/response.json \
+              -w '%{http_code}' \
+              -X POST \
+              http://127.0.0.1:8080/parse \
+              -H "Content-Type: application/json" \
+              -d '{"text":"set an alarm for seven am tomorrow"}' \
+              || true)
+
+            if [ "$STATUS" = "200" ]; then
+              echo "Ingress returned HTTP 200"
+              cat /tmp/response.json
+              break
+            fi
+
+            echo "Attempt $i returned $STATUS"
+            sleep 3
+          done
+
+          test "$STATUS" = "200"
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          result = json.loads(
+              Path("/tmp/response.json").read_text()
+          )
+
+          assert set(result) == {
+              "intent", "date", "time", "place"
+          }
+
+          assert result["intent"] == "alarm_set"
+
+          print("PASS: Kubernetes API working!")
+          PY
+
+      - name: Save cluster evidence
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p results/kubernetes
+
+          kubectl get nodes -o wide \
+            > results/kubernetes/nodes.txt 2>&1 || true
+
+          kubectl get pods -n app -o wide \
+            > results/kubernetes/pods.txt 2>&1 || true
+
+          kubectl get all,ingress -n app \
+            > results/kubernetes/resources.txt 2>&1 || true
+
+          kubectl describe pods -n app \
+            > results/kubernetes/pod-details.txt 2>&1 || true
+
+          kubectl logs -n app \
+            -l app=command-parser \
+            --all-containers=true \
+            --prefix=true \
+            --max-log-requests=10 \
+            > results/kubernetes/app-logs.txt 2>&1 || true
+
+          if [ -f /tmp/response.json ]; then
+            cp /tmp/response.json \
+              results/kubernetes/response.json
+          fi
+
+      - name: Upload Kubernetes evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kubernetes-evidence
+          path: results/kubernetes/
+          if-no-files-found: warn
+
+      - name: Delete cluster
+        if: always()
+        run: |
+          k3d cluster delete cs3081 || true
