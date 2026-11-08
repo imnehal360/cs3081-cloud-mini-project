@@ -14,57 +14,156 @@ concurrency:
 jobs:
   label:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 180
 
     steps:
+      # 1. Checkout repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2. Restore latest checkpoint
       - name: Restore previous checkpoint
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           mkdir -p results
+          mkdir -p /tmp/checkpoint
+
+          BEST_COUNT=0
 
           for id in $(gh run list \
             --workflow label-batch.yml \
-            --limit 50 \
+            --limit 100 \
             --json databaseId \
             --jq '.[].databaseId'); do
 
+            if [ "$id" = "${{ github.run_id }}" ]; then
+              continue
+            fi
+
+            rm -f /tmp/checkpoint/shard-*.jsonl
+
             if gh run download "$id" \
               --name teacher-checkpoint \
-              --dir results; then
-              echo "Restored checkpoint from run $id"
-              break
+              --dir /tmp/checkpoint 2>/dev/null; then
+
+              COUNT=$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          files = [
+              Path(f"/tmp/checkpoint/shard-{i}.jsonl")
+              for i in (0, 1)
+          ]
+
+          if not all(p.exists() for p in files):
+              print(0)
+          else:
+              try:
+                  rows = [
+                      json.loads(line)
+                      for p in files
+                      for line in p.read_text().splitlines()
+                      if line.strip()
+                  ]
+                  ids = [row["id"] for row in rows]
+                  print(
+                      len(rows)
+                      if len(ids) == len(set(ids))
+                      else 0
+                  )
+              except (ValueError, KeyError):
+                  print(0)
+          PY
+              )
+
+              if [ "$COUNT" -gt "$BEST_COUNT" ]; then
+                cp /tmp/checkpoint/shard-*.jsonl results/
+                BEST_COUNT=$COUNT
+                echo "Best checkpoint: run $id ($COUNT records)"
+              fi
+
+              if [ "$BEST_COUNT" -eq 3000 ]; then
+                break
+              fi
             fi
           done
 
+          echo "RESTORED: $BEST_COUNT / 3000"
+
+          if [ "$BEST_COUNT" -eq 0 ]; then
+            echo "No checkpoint restored."
+            echo "Stopping to avoid losing previous progress."
+            exit 1
+          fi
+
+      # 3. Install Ollama
       - name: Install Ollama
+        shell: bash
         run: |
           curl -fsSL https://ollama.com/install.sh | sh
+          ollama --version
 
+      # 4. Start Ollama safely
       - name: Start Ollama
+        shell: bash
         run: |
-          ollama serve > /tmp/ollama.log 2>&1 &
+          set -e
 
-          for i in $(seq 1 30); do
-            if curl -fsS http://localhost:11434/api/tags \
-                >/dev/null; then
+          echo "Checking Ollama API..."
+
+          if curl -fsS \
+            http://127.0.0.1:11434/api/tags \
+            >/dev/null 2>&1; then
+            echo "Ollama already running."
+            exit 0
+          fi
+
+          echo "Starting Ollama..."
+
+          OLLAMA_HOST=127.0.0.1:11434 \
+            nohup ollama serve \
+            > /tmp/ollama.log 2>&1 \
+            < /dev/null &
+
+          for i in $(seq 1 90); do
+            if curl -fsS \
+              http://127.0.0.1:11434/api/tags \
+              >/dev/null 2>&1; then
+              echo "Ollama started successfully!"
               exit 0
             fi
+
             sleep 2
           done
 
+          echo "ERROR: Ollama failed to start."
+          echo "=== Ollama logs ==="
+          cat /tmp/ollama.log || true
+
+          echo "=== Processes ==="
+          ps aux | grep '[o]llama' || true
+
+          echo "=== Service logs ==="
+          sudo journalctl -u ollama \
+            -n 50 --no-pager || true
+
           exit 1
 
+      # 5. Download teacher model
       - name: Download Phi-3.5
-        run: ollama pull phi3.5
+        shell: bash
+        run: |
+          ollama pull phi3.5
+          ollama list
 
+      # 6. Run two workers
       - name: Run two labelling workers
         shell: bash
         run: |
+          echo "Starting two parallel workers..."
+
           SHARD_INDEX=0 SHARD_COUNT=2 MAX_COMMANDS=150 \
             python3 worker/label_worker.py &
           PID0=$!
@@ -74,23 +173,42 @@ jobs:
           PID1=$!
 
           FAILED=0
+
           wait "$PID0" || FAILED=1
           wait "$PID1" || FAILED=1
-          exit "$FAILED"
 
+          if [ "$FAILED" -ne 0 ]; then
+            echo "One or more workers failed."
+            exit 1
+          fi
+
+          echo "Both workers completed."
+
+      # 7. Verify saved records
       - name: Count saved records
         if: always()
+        shell: bash
         run: |
           python3 - <<'PY'
           import json
           from pathlib import Path
 
-          total = 0
+          dataset = Path("data/commands_pool.jsonl")
+          expected = [
+              json.loads(line)
+              for line in dataset.read_text().splitlines()
+              if line.strip()
+          ]
+
+          expected_ids = {r["id"] for r in expected}
           ids = set()
+          total = 0
 
           for index in (0, 1):
               path = Path(f"results/shard-{index}.jsonl")
+
               if not path.exists():
+                  print(f"Shard {index}: missing")
                   continue
 
               rows = [
@@ -100,15 +218,29 @@ jobs:
               ]
 
               for row in rows:
-                  assert row["id"] not in ids
+                  assert set(row) == {
+                      "id", "text", "teacher_raw"
+                  }
+                  assert row["id"] in expected_ids
+                  assert row["id"] not in ids, (
+                      f"Duplicate ID: {row['id']}"
+                  )
                   ids.add(row["id"])
 
               print(f"Shard {index}: {len(rows)} records")
               total += len(rows)
 
           print(f"TOTAL SAVED: {total} / 3000")
+          print(f"REMAINING: {3000 - total}")
+
+          assert total <= len(expected)
+
+          if total == len(expected):
+              assert ids == expected_ids
+              print("SUCCESS: All 3000 commands labelled!")
           PY
 
+      # 8. Save checkpoint even after worker errors
       - name: Save checkpoint
         if: always()
         uses: actions/upload-artifact@v4
