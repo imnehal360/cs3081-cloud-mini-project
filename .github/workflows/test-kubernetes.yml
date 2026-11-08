@@ -200,6 +200,9 @@ jobs:
             --max-log-requests=10 \
             > results/kubernetes/app-logs.txt 2>&1 || true
 
+          kubectl describe hpa command-parser-hpa -n app \
+            > results/kubernetes/hpa-details.txt 2>&1 || true
+
           if [ -f /tmp/response.json ]; then
             cp /tmp/response.json \
               results/kubernetes/response.json
