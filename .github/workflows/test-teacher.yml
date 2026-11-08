@@ -1,0 +1,93 @@
+
+name: Test Teacher Labelling
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-teacher:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+
+      - name: Start Ollama
+        run: |
+          ollama serve > /tmp/ollama.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:11434/api/tags; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Ollama failed to start"
+          exit 1
+
+      - name: Download Phi-3.5
+        run: ollama pull phi3.5
+
+      - name: Run two workers
+        shell: bash
+        run: |
+          mkdir -p results
+
+          SHARD_INDEX=0 SHARD_COUNT=2 MAX_COMMANDS=2 \
+            python3 worker/label_worker.py &
+          PID0=$!
+
+          SHARD_INDEX=1 SHARD_COUNT=2 MAX_COMMANDS=2 \
+            python3 worker/label_worker.py &
+          PID1=$!
+
+          wait "$PID0"
+          STATUS0=$?
+
+          wait "$PID1"
+          STATUS1=$?
+
+          if [ "$STATUS0" -ne 0 ] || [ "$STATUS1" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Verify output
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          all_ids = []
+
+          for index in (0, 1):
+              path = Path(f"results/shard-{index}.jsonl")
+              records = [
+                  json.loads(line)
+                  for line in path.read_text().splitlines()
+              ]
+              assert len(records) == 2
+              for record in records:
+                  assert set(record) == {
+                      "id", "text", "teacher_raw"
+                  }
+                  parsed = json.loads(record["teacher_raw"])
+                  assert set(parsed) == {
+                      "intent", "date", "time", "place"
+                  }
+                  all_ids.append(record["id"])
+
+          assert len(set(all_ids)) == 4
+          print("PASS: 4 unique commands labelled")
+          PY
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: teacher-test-results
+          path: results/shard-*.jsonl
+          if-no-files-found: warn
