@@ -44,6 +44,19 @@ def generate_label(command, prompt):
     return result["response"]
 
 
+def load_completed_ids():
+    completed = set()
+
+    if OUTPUT.exists():
+        with OUTPUT.open(encoding="utf-8") as file:
+            for line in file:
+                if line.strip():
+                    record = json.loads(line)
+                    completed.add(record["id"])
+
+    return completed
+
+
 def main():
     if SHARD_COUNT < 1:
         raise ValueError("SHARD_COUNT must be >= 1")
@@ -54,19 +67,29 @@ def main():
     prompt = PROMPT.read_text(encoding="utf-8")
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
 
+    completed_ids = load_completed_ids()
+
+    print(
+        f"Shard {SHARD_INDEX}: "
+        f"{len(completed_ids)} existing records"
+    )
+
     processed = 0
 
     with DATASET.open(encoding="utf-8") as source, \
-         OUTPUT.open("w", encoding="utf-8") as target:
+         OUTPUT.open("a", encoding="utf-8") as target:
 
         for line_number, line in enumerate(source):
             if line_number % SHARD_COUNT != SHARD_INDEX:
                 continue
 
+            item = json.loads(line)
+
+            if item["id"] in completed_ids:
+                continue
+
             if MAX_COMMANDS and processed >= MAX_COMMANDS:
                 break
-
-            item = json.loads(line)
 
             raw_reply = generate_label(
                 item["text"], prompt
@@ -84,14 +107,19 @@ def main():
             )
             target.flush()
 
+            completed_ids.add(item["id"])
             processed += 1
+
             print(
                 f"Shard {SHARD_INDEX}: "
-                f"{processed} commands processed",
-                flush=True,
+                f"{processed} new commands processed",
+                flush=True
             )
 
-    print(f"Saved {processed} records to {OUTPUT}")
+    print(
+        f"Shard {SHARD_INDEX}: "
+        f"saved {processed} new records to {OUTPUT}"
+    )
 
 
 if __name__ == "__main__":
