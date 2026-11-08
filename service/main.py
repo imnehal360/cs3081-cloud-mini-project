@@ -13,6 +13,12 @@ except ModuleNotFoundError:
     from model_runner import ModelRunner
 
 
+try:
+    from service.model_downloader import download_model
+except ModuleNotFoundError:
+    from model_downloader import download_model
+
+
 runner = None
 ready = False
 
@@ -34,7 +40,7 @@ REQUIRED_KEYS = {"intent", "date", "time", "place"}
 async def lifespan(app: FastAPI):
     global runner, ready
 
-    model_path = os.getenv("MODEL_PATH", "/models/v1")
+    model_path = download_model()
     runner = ModelRunner(model_path)
     ready = True
 
