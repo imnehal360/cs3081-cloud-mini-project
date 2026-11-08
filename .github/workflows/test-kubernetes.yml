@@ -364,6 +364,9 @@ jobs:
           kubectl describe pods -n app \
             > results/kubernetes/pod-details.txt 2>&1 || true
 
+          kubectl get pods,services,endpoints -n app -o wide \
+            > results/kubernetes/load-balancing-state.txt 2>&1 || true
+
           kubectl logs -n app \
             -l app=command-parser \
             --all-containers=true \
