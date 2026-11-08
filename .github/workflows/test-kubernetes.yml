@@ -90,6 +90,47 @@ jobs:
           kubectl get hpa -n app
           kubectl describe hpa command-parser-hpa -n app
 
+      - name: Test HPA scaling
+        shell: bash
+        run: |
+          set -e
+
+          echo "=== Scale down to one replica ==="
+          kubectl scale deployment command-parser \
+            --replicas=1 -n app
+
+          kubectl rollout status deployment/command-parser \
+            -n app --timeout=180s
+
+          echo "=== Generate CPU load ==="
+          POD=$(kubectl get pods -n app \
+            -l app=command-parser \
+            -o jsonpath='{.items[0].metadata.name}')
+
+          kubectl exec -n app "$POD" -- \
+            python -c '
+          import hashlib, time
+          end = time.monotonic() + 180
+          data = b"cs3081-load"
+          while time.monotonic() < end:
+              data = hashlib.sha256(data).digest()
+          ' &
+
+          LOAD_PID=$!
+
+          echo "=== Monitor HPA ==="
+          for i in $(seq 1 15); do
+            kubectl get hpa -n app
+            kubectl get deployment command-parser -n app
+            sleep 15
+          done
+
+          wait "$LOAD_PID" || true
+
+          echo "=== Final HPA state ==="
+          kubectl get hpa -n app
+          kubectl get pods -n app
+
       - name: Test API through Ingress
         shell: bash
         run: |
