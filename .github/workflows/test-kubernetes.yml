@@ -244,6 +244,46 @@ jobs:
 
           echo "PASS: Rolling update and rollback completed!"
 
+      - name: Test Pod recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== Set deployment to 2 replicas ==="
+          kubectl scale deployment/command-parser \
+            --replicas=2 -n app
+
+          kubectl rollout status deployment/command-parser \
+            -n app --timeout=300s
+
+          echo "=== Delete one Pod ==="
+          POD=$(kubectl get pods -n app \
+            -l app=command-parser \
+            -o jsonpath='{.items[0].metadata.name}')
+
+          echo "Deleting Pod: $POD"
+          kubectl delete pod "$POD" -n app
+
+          echo "=== Wait for recovery ==="
+          kubectl rollout status deployment/command-parser \
+            -n app --timeout=300s
+
+          kubectl wait \
+            --for=condition=Ready pod \
+            -l app=command-parser \
+            -n app --timeout=300s
+
+          echo "=== Verify replica count ==="
+          kubectl get pods -n app
+
+          READY=$(kubectl get deployment \
+            command-parser -n app \
+            -o jsonpath='{.status.readyReplicas}')
+
+          test "$READY" = "2"
+
+          echo "PASS: Kubernetes restored 2 ready replicas!"
+
       - name: Save cluster evidence
         if: always()
         shell: bash
