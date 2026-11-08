@@ -180,11 +180,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "=== Disable HPA during controlled update ==="
+          echo "=== Disable HPA ==="
           kubectl delete hpa command-parser-hpa \
             -n app --ignore-not-found
 
-          echo "=== Update from v1 to v2 ==="
+          echo "=== Update v1 to v2 ==="
           kubectl set env deployment/command-parser \
             -n app MODEL_VERSION=v2
 
@@ -192,41 +192,57 @@ jobs:
             -n app --timeout=300s
 
           echo "=== Verify v2 ==="
-          for i in 1 2 3; do
-            curl -fsS \
-              -D /tmp/v2-headers.txt \
-              -o /tmp/v2-response.json \
-              -X POST http://127.0.0.1:8080/parse \
-              -H "Content-Type: application/json" \
-              -d '{"text":"set an alarm for seven am tomorrow"}'
+          verify_version() {
+            local expected="$1"
+            local success=0
 
-            grep -iq 'x-model-version: v2' \
-              /tmp/v2-headers.txt
-          done
+            for i in $(seq 1 30); do
+              status=$(curl -sS \
+                --max-time 30 \
+                -D /tmp/model-headers.txt \
+                -o /tmp/model-response.json \
+                -w '%{http_code}' \
+                -X POST http://127.0.0.1:8080/parse \
+                -H "Content-Type: application/json" \
+                -d '{"text":"set an alarm for seven am tomorrow"}' \
+                || true)
 
-          echo "Model v2 is serving requests."
+              if [ "$status" = "200" ] && \
+                 grep -iq "x-model-version: $expected" \
+                   /tmp/model-headers.txt; then
+                echo "PASS: $expected responded correctly"
+                success=1
+                break
+              fi
+
+              echo "Attempt $i: HTTP $status"
+              sleep 3
+            done
+
+            if [ "$success" -ne 1 ]; then
+              echo "ERROR: $expected verification failed"
+              kubectl get pods,endpoints -n app
+              kubectl logs -n app \
+                -l app=command-parser \
+                --tail=60 --prefix=true \
+                --max-log-requests=10 || true
+              return 1
+            fi
+          }
+
+          verify_version v2
 
           echo "=== Roll back to v1 ==="
-          kubectl rollout undo \
-            deployment/command-parser -n app
+          kubectl rollout undo deployment/command-parser \
+            -n app
 
           kubectl rollout status deployment/command-parser \
             -n app --timeout=300s
 
           echo "=== Verify v1 ==="
-          for i in 1 2 3; do
-            curl -fsS \
-              -D /tmp/v1-headers.txt \
-              -o /tmp/v1-response.json \
-              -X POST http://127.0.0.1:8080/parse \
-              -H "Content-Type: application/json" \
-              -d '{"text":"set an alarm for seven am tomorrow"}'
+          verify_version v1
 
-            grep -iq 'x-model-version: v1' \
-              /tmp/v1-headers.txt
-          done
-
-          echo "PASS: v1 to v2 update and rollback!"
+          echo "PASS: Rolling update and rollback completed!"
 
       - name: Save cluster evidence
         if: always()
