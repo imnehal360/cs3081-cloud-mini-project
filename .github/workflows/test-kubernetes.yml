@@ -284,6 +284,68 @@ jobs:
 
           echo "PASS: Kubernetes restored 2 ready replicas!"
 
+      - name: Test load balancing
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== Ensure 2 Ready replicas ==="
+          kubectl scale deployment/command-parser \
+            --replicas=2 -n app
+
+          kubectl rollout status deployment/command-parser \
+            -n app --timeout=300s
+
+          echo "=== Send 40 requests ==="
+
+          python3 - <<'PY'
+          import json
+          import urllib.request
+          from collections import Counter
+
+          counts = Counter()
+          failures = 0
+
+          for i in range(40):
+              data = json.dumps({
+                  "text": "set an alarm for seven am tomorrow"
+              }).encode()
+
+              req = urllib.request.Request(
+                  "http://127.0.0.1:8080/parse",
+                  data=data,
+                  headers={"Content-Type": "application/json"},
+                  method="POST",
+              )
+
+              try:
+                  with urllib.request.urlopen(
+                      req, timeout=30
+                  ) as response:
+                      pod = response.headers.get("X-Served-By")
+                      counts[pod] += 1
+              except Exception as e:
+                  failures += 1
+                  print(f"Request {i + 1} failed: {e}")
+
+          total = sum(counts.values())
+
+          print("=== Requests per Pod ===")
+          for pod, count in counts.items():
+              print(f"{pod}: {count} requests")
+
+          print(f"Successful: {total}")
+          print(f"Failed: {failures}")
+
+          assert failures == 0
+          assert len(counts) == 2
+
+          for count in counts.values():
+              assert count / total >= 0.30
+
+          print("PASS: Both replicas served at least 30%!")
+          PY
+
       - name: Save cluster evidence
         if: always()
         shell: bash
