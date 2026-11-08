@@ -346,6 +346,43 @@ jobs:
           print("PASS: Both replicas served at least 30%!")
           PY
 
+      - name: Run Locust performance test
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 -m pip install "locust==2.32.6"
+
+          mkdir -p results
+
+          echo "=== Ensure two ready replicas ==="
+          kubectl scale deployment/command-parser \
+            --replicas=2 -n app
+
+          kubectl rollout status deployment/command-parser \
+            -n app --timeout=300s
+
+          echo "=== Start performance test ==="
+          locust \
+            -f tools/locustfile.py \
+            --headless \
+            --users 4 \
+            --spawn-rate 4 \
+            --run-time 2m \
+            --host http://127.0.0.1:8080 \
+            --csv results/loadtest \
+            --exit-code-on-error 0
+
+          echo "=== Pod resource consumption ==="
+          kubectl top pods -n app \
+            > results/pod-resources.txt 2>&1 || true
+
+          echo "=== Load test summary ==="
+          cat results/loadtest_stats.csv
+
+          echo "=== Request distribution ==="
+          cat results/loadtest_headers.json || true
+
       - name: Save cluster evidence
         if: always()
         shell: bash
@@ -387,7 +424,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: kubernetes-evidence
-          path: results/kubernetes/
+          path: |
+            results/kubernetes/
+            results/loadtest*
+            results/pod-resources.txt
           if-no-files-found: warn
 
       - name: Delete cluster
