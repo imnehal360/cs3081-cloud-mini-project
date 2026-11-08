@@ -65,11 +65,11 @@ jobs:
       - name: Run two labelling workers
         shell: bash
         run: |
-          SHARD_INDEX=0 SHARD_COUNT=2 MAX_COMMANDS=10 \
+          SHARD_INDEX=0 SHARD_COUNT=2 MAX_COMMANDS=50 \
             python3 worker/label_worker.py &
           PID0=$!
 
-          SHARD_INDEX=1 SHARD_COUNT=2 MAX_COMMANDS=10 \
+          SHARD_INDEX=1 SHARD_COUNT=2 MAX_COMMANDS=50 \
             python3 worker/label_worker.py &
           PID1=$!
 
