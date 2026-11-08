@@ -1,0 +1,132 @@
+name: Test FastAPI Docker Service
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "service/**"
+      - ".github/workflows/test-service.yml"
+
+jobs:
+  test-service:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t cs3081-api:v1 \
+            -f service/Dockerfile .
+
+      - name: Check image size
+        run: |
+          docker image ls cs3081-api:v1
+
+      - name: Start FastAPI container
+        run: |
+          docker run -d \
+            --name cs3081-api \
+            -p 8000:8000 \
+            -e MODEL_VERSION=v1 \
+            -e MAX_NEW_TOKENS=80 \
+            cs3081-api:v1
+
+      - name: Wait for model readiness
+        shell: bash
+        run: |
+          echo "Waiting for model download and loading..."
+
+          for i in $(seq 1 120); do
+            if curl -fsS \
+              http://localhost:8000/readyz \
+              >/dev/null 2>&1; then
+              echo "Model is ready!"
+              exit 0
+            fi
+
+            if [ "$(docker inspect \
+              -f '{{.State.Running}}' \
+              cs3081-api)" != "true" ]; then
+              echo "Container stopped unexpectedly."
+              docker logs cs3081-api
+              exit 1
+            fi
+
+            sleep 2
+          done
+
+          echo "Model failed to become ready."
+          docker logs cs3081-api
+          exit 1
+
+      - name: Test health endpoint
+        run: |
+          curl --fail http://localhost:8000/healthz
+
+      - name: Test readiness endpoint
+        run: |
+          curl --fail http://localhost:8000/readyz
+
+      - name: Test command parsing
+        shell: bash
+        run: |
+          curl --fail-with-body -sS \
+            -D /tmp/parse-headers.txt \
+            -o /tmp/parse-response.json \
+            -X POST http://localhost:8000/parse \
+            -H "Content-Type: application/json" \
+            -d '{"text":"set an alarm for seven am tomorrow"}'
+
+          echo "Response:"
+          cat /tmp/parse-response.json
+
+          echo ""
+          echo "Response headers:"
+          cat /tmp/parse-headers.txt
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          response = json.loads(
+              Path("/tmp/parse-response.json").read_text()
+          )
+
+          required = {
+              "intent", "date", "time", "place"
+          }
+
+          assert set(response) == required
+          assert response["intent"] == "alarm_set"
+
+          headers = Path(
+              "/tmp/parse-headers.txt"
+          ).read_text().lower()
+
+          assert "x-model-version: v1" in headers
+          assert "x-served-by:" in headers
+
+          print("PASS: API response and headers verified!")
+          PY
+
+      - name: Save Docker logs
+        if: always()
+        run: |
+          mkdir -p results
+          docker logs cs3081-api \
+            > results/service-docker.log 2>&1 || true
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: service-test-results
+          path: |
+            results/service-docker.log
+            /tmp/parse-response.json
+            /tmp/parse-headers.txt
+          if-no-files-found: warn
