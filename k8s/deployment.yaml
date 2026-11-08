@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: command-parser
+  namespace: app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: command-parser
+  template:
+    metadata:
+      labels:
+        app: command-parser
+    spec:
+      containers:
+        - name: command-parser
+          image: cs3081-api:v1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: MODEL_VERSION
+              value: "v1"
+            - name: MAX_NEW_TOKENS
+              value: "80"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8000
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
