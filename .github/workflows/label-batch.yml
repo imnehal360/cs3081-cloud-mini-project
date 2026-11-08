@@ -1,0 +1,119 @@
+name: Teacher Labelling Batch
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: teacher-labelling
+  cancel-in-progress: false
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Restore previous checkpoint
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          mkdir -p results
+
+          for id in $(gh run list \
+            --workflow label-batch.yml \
+            --limit 50 \
+            --json databaseId \
+            --jq '.[].databaseId'); do
+
+            if gh run download "$id" \
+              --name teacher-checkpoint \
+              --dir results; then
+              echo "Restored checkpoint from run $id"
+              break
+            fi
+          done
+
+      - name: Install Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+
+      - name: Start Ollama
+        run: |
+          ollama serve > /tmp/ollama.log 2>&1 &
+
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:11434/api/tags \
+                >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+
+          exit 1
+
+      - name: Download Phi-3.5
+        run: ollama pull phi3.5
+
+      - name: Run two labelling workers
+        shell: bash
+        run: |
+          SHARD_INDEX=0 SHARD_COUNT=2 MAX_COMMANDS=10 \
+            python3 worker/label_worker.py &
+          PID0=$!
+
+          SHARD_INDEX=1 SHARD_COUNT=2 MAX_COMMANDS=10 \
+            python3 worker/label_worker.py &
+          PID1=$!
+
+          FAILED=0
+          wait "$PID0" || FAILED=1
+          wait "$PID1" || FAILED=1
+          exit "$FAILED"
+
+      - name: Count saved records
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          total = 0
+          ids = set()
+
+          for index in (0, 1):
+              path = Path(f"results/shard-{index}.jsonl")
+              if not path.exists():
+                  continue
+
+              rows = [
+                  json.loads(line)
+                  for line in path.read_text().splitlines()
+                  if line.strip()
+              ]
+
+              for row in rows:
+                  assert row["id"] not in ids
+                  ids.add(row["id"])
+
+              print(f"Shard {index}: {len(rows)} records")
+              total += len(rows)
+
+          print(f"TOTAL SAVED: {total} / 3000")
+          PY
+
+      - name: Save checkpoint
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: teacher-checkpoint
+          path: results/shard-*.jsonl
+          if-no-files-found: warn
+          retention-days: 30
