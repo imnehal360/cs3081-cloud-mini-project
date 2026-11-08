@@ -187,11 +187,11 @@ jobs:
         run: |
           echo "Starting two parallel workers..."
 
-          SHARD_INDEX=0 SHARD_COUNT=2 MAX_COMMANDS=150 \
+          SHARD_INDEX=0 SHARD_COUNT=2 MAX_COMMANDS=67 \
             python3 worker/label_worker.py &
           PID0=$!
 
-          SHARD_INDEX=1 SHARD_COUNT=2 MAX_COMMANDS=150 \
+          SHARD_INDEX=1 SHARD_COUNT=2 MAX_COMMANDS=68 \
             python3 worker/label_worker.py &
           PID1=$!
 
