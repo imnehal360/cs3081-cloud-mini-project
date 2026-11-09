@@ -1,0 +1,2 @@
+NAME                  STATUS   ROLES           AGE     VERSION        INTERNAL-IP   EXTERNAL-IP   OS-IMAGE           KERNEL-VERSION     CONTAINER-RUNTIME
+k3d-cs3081-server-0   Ready    control-plane   8m16s   v1.35.5+k3s1   172.18.0.2    <none>        K3s v1.35.5+k3s1   7.0.0-1019-azure   containerd://2.2.3-k3s1

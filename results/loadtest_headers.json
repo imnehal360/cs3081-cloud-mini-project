@@ -1,0 +1,9 @@
+{
+  "per_replica": {
+    "command-parser-7dd9d9d594-gjqvw": 181,
+    "command-parser-7dd9d9d594-7fjpb": 185
+  },
+  "per_model_version": {
+    "v1": 366
+  }
+}

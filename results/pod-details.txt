@@ -1,0 +1,130 @@
+Name:             command-parser-7dd9d9d594-7fjpb
+Namespace:        app
+Priority:         0
+Service Account:  default
+Node:             k3d-cs3081-server-0/172.18.0.2
+Start Time:       Sun, 08 Nov 2026 20:25:54 +0000
+Labels:           app=command-parser
+                  pod-template-hash=7dd9d9d594
+Annotations:      <none>
+Status:           Running
+IP:               10.42.0.14
+IPs:
+  IP:           10.42.0.14
+Controlled By:  ReplicaSet/command-parser-7dd9d9d594
+Containers:
+  command-parser:
+    Container ID:   containerd://159bc593e05c1b53c02bec4f3bc6c96b792e6b9291a3d0264aa16ec8e9deac1e
+    Image:          cs3081-api:v1
+    Image ID:       sha256:bb77fecc62e4a0a327f7d68bf2a89f6d963814b3d53a38929d05a404b9158b1c
+    Port:           8000/TCP
+    Host Port:      0/TCP
+    State:          Running
+      Started:      Sun, 08 Nov 2026 20:25:54 +0000
+    Ready:          True
+    Restart Count:  0
+    Limits:
+      cpu:     1
+      memory:  1Gi
+    Requests:
+      cpu:      250m
+      memory:   512Mi
+    Liveness:   http-get http://:8000/healthz delay=30s timeout=1s period=10s #success=1 #failure=3
+    Readiness:  http-get http://:8000/readyz delay=0s timeout=1s period=5s #success=1 #failure=12
+    Environment:
+      MODEL_VERSION:   v1
+      MAX_NEW_TOKENS:  80
+    Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-89jhj (ro)
+Conditions:
+  Type                        Status
+  PodReadyToStartContainers   True 
+  Initialized                 True 
+  Ready                       True 
+  ContainersReady             True 
+  PodScheduled                True 
+Volumes:
+  kube-api-access-89jhj:
+    Type:                    Projected (a volume that contains injected data from multiple sources)
+    TokenExpirationSeconds:  3607
+    ConfigMapName:           kube-root-ca.crt
+    ConfigMapOptional:       <nil>
+    DownwardAPI:             true
+QoS Class:                   Burstable
+Node-Selectors:              <none>
+Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
+                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
+Events:
+  Type     Reason     Age                    From               Message
+  ----     ------     ----                   ----               -------
+  Normal   Scheduled  2m49s                  default-scheduler  Successfully assigned app/command-parser-7dd9d9d594-7fjpb to k3d-cs3081-server-0
+  Normal   Pulled     2m49s                  kubelet            Container image "cs3081-api:v1" already present on machine and can be accessed by the pod
+  Normal   Created    2m49s                  kubelet            Container created
+  Normal   Started    2m49s                  kubelet            Container started
+  Warning  Unhealthy  2m42s (x3 over 2m48s)  kubelet            Readiness probe failed: Get "http://10.42.0.14:8000/readyz": dial tcp 10.42.0.14:8000: connect: connection refused
+
+
+Name:             command-parser-7dd9d9d594-gjqvw
+Namespace:        app
+Priority:         0
+Service Account:  default
+Node:             k3d-cs3081-server-0/172.18.0.2
+Start Time:       Sun, 08 Nov 2026 20:25:41 +0000
+Labels:           app=command-parser
+                  pod-template-hash=7dd9d9d594
+Annotations:      <none>
+Status:           Running
+IP:               10.42.0.13
+IPs:
+  IP:           10.42.0.13
+Controlled By:  ReplicaSet/command-parser-7dd9d9d594
+Containers:
+  command-parser:
+    Container ID:   containerd://421302fb2a950c03a06f2f9fafe284d29dfb606ffb764b875241ee290de864f1
+    Image:          cs3081-api:v1
+    Image ID:       sha256:bb77fecc62e4a0a327f7d68bf2a89f6d963814b3d53a38929d05a404b9158b1c
+    Port:           8000/TCP
+    Host Port:      0/TCP
+    State:          Running
+      Started:      Sun, 08 Nov 2026 20:25:41 +0000
+    Ready:          True
+    Restart Count:  0
+    Limits:
+      cpu:     1
+      memory:  1Gi
+    Requests:
+      cpu:      250m
+      memory:   512Mi
+    Liveness:   http-get http://:8000/healthz delay=30s timeout=1s period=10s #success=1 #failure=3
+    Readiness:  http-get http://:8000/readyz delay=0s timeout=1s period=5s #success=1 #failure=12
+    Environment:
+      MODEL_VERSION:   v1
+      MAX_NEW_TOKENS:  80
+    Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-6gdml (ro)
+Conditions:
+  Type                        Status
+  PodReadyToStartContainers   True 
+  Initialized                 True 
+  Ready                       True 
+  ContainersReady             True 
+  PodScheduled                True 
+Volumes:
+  kube-api-access-6gdml:
+    Type:                    Projected (a volume that contains injected data from multiple sources)
+    TokenExpirationSeconds:  3607
+    ConfigMapName:           kube-root-ca.crt
+    ConfigMapOptional:       <nil>
+    DownwardAPI:             true
+QoS Class:                   Burstable
+Node-Selectors:              <none>
+Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
+                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
+Events:
+  Type     Reason     Age                   From               Message
+  ----     ------     ----                  ----               -------
+  Normal   Scheduled  3m2s                  default-scheduler  Successfully assigned app/command-parser-7dd9d9d594-gjqvw to k3d-cs3081-server-0
+  Normal   Pulled     3m2s                  kubelet            Container image "cs3081-api:v1" already present on machine and can be accessed by the pod
+  Normal   Created    3m2s                  kubelet            Container created
+  Normal   Started    3m2s                  kubelet            Container started
+  Warning  Unhealthy  2m55s (x3 over 3m1s)  kubelet            Readiness probe failed: Get "http://10.42.0.13:8000/readyz": dial tcp 10.42.0.13:8000: connect: connection refused
